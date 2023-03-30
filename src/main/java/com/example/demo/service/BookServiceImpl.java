@@ -81,12 +81,12 @@ public class BookServiceImpl implements BookService {
 	        httpHeaders.set("Authorization", "KakaoAK acd3d21d6fc4374fcaac3899d94dc50f");
 	        HttpEntity<String> httpEntity = new HttpEntity<>(httpHeaders);
 	        
-	        int page = 1;
+	        int page = 2;
 	        int timeout = 0; //To avoid potential infinite loop
 	        boolean end = false;
-	        while (count<10 && timeout<21 && page<51 && end==false) {
+	        while (count<3 && timeout<21 && page<51 && end==false) { //Would it help to split by threads? Each thread would need to have a separate transaction, which would cause separate locks, so it may not help.
 		        MultiValueMap<String, String> queryParams = new LinkedMultiValueMap<>();
-		        queryParams.add("size", String.valueOf(Math.min(1000-count, 50)));
+		        queryParams.add("size", String.valueOf(Math.min(1000-count, 3)));
 		        queryParams.add("page", String.valueOf(page));
 		        queryParams.add("query", query);
 		        
@@ -99,7 +99,7 @@ public class BookServiceImpl implements BookService {
 	
 		        ResponseEntity<KakaoBook> result = restTemplate.exchange(targetUrl, HttpMethod.GET, httpEntity, KakaoBook.class);
 		        for (Document r : result.getBody().getDocuments()) {
-		    		if(bookRepository.existsByIsbn(r.getIsbn())) {
+		    		if(bookRepository.existsByIsbn(r.getIsbn())) { //Possible to use a single query to check nonexisting isbn?
 		    			continue;
 		    		}
 		    		addBookFromDocument(r);
@@ -109,7 +109,7 @@ public class BookServiceImpl implements BookService {
 	        	timeout++;
 	        	page++;
 	        }
-
+/*
 	        //If we don't get 1000 books, fill the rest
 	        page = 1;
 	        timeout = 0;
@@ -141,7 +141,7 @@ public class BookServiceImpl implements BookService {
 		        
 	        	timeout++;
 	        	page++;
-	        }
+	        }*/
 	       /* 
 			List<RelGroup> temp = relGroupRepository.findAll();
 			for (RelGroup r : temp) {
@@ -199,7 +199,7 @@ public class BookServiceImpl implements BookService {
 		Book book = new Book();
 		book.setTitle(title);
 		book.setIsbn(d.getIsbn());
-		Book savedBook = bookRepository.save(book);
+		Book savedBook = bookRepository.save(book); //Change to saveAll to insert once
 
 		//For each word in title and content, clean and add them
 		String[] cleanedTitle = splitStringBySpaceAndClean(title);
@@ -239,7 +239,7 @@ public class BookServiceImpl implements BookService {
 			/*for (Word r : temp) {
 				System.out.println(r.getWordval());
 			}*/		
-			Set<Word> wordSet = wordRepository.findByWordval(word);
+			Set<Word> wordSet = wordRepository.findByWordval(word);  //각 단어마다 findByWordval을 할지. 하니면 findAll해서 할지 
 			myWord = wordSet.iterator().next();
 			//System.out.println("=================Found Word==============");
 			//System.out.println(word);
@@ -254,8 +254,8 @@ public class BookServiceImpl implements BookService {
 		}
 		//System.out.println("==============WHEN1=================");
 		Set<RelGroup> relGroupMappedWithWord = myWord.getRelgroup();
-		for(RelGroup rg : relGroupMappedWithWord) {
-			if(rg.getBook().getId() == book.getId()) {
+		for(RelGroup rg : relGroupMappedWithWord) { //n+1?
+			if(rg.getBook().getId() == book.getId()) { 
 				//System.out.println("=================Word exists in this book==============");
 				//System.out.println(book.getId());				
 				return;
@@ -270,12 +270,12 @@ public class BookServiceImpl implements BookService {
 		 */
 		RelGroup myRelGroup;
 		try {
-			Set<RelGroup> relGroupSet = relGroupRepository.findByFirstletterAndBookIdAndFilled(firstLetter,book.getId(),false);
+			Set<RelGroup> relGroupSet = relGroupRepository.findByFirstletterAndBookIdAndFilled(firstLetter,book.getId(),false); //n+1
 			//System.out.println("==============WHEN3=================");
 			RelGroup temp = relGroupSet.iterator().next();
 			
 			//If the group has 9 words, then we set it to filled.
-			if (temp.getWord().size()==9) {
+			if (temp.getWord().size()==9) { //n+1
 				temp.setFilled(true);
 				myRelGroup = relGroupRepository.save(temp);
 			}
@@ -303,8 +303,8 @@ public class BookServiceImpl implements BookService {
 		 */
 		boolean foundPair = false;
 		Word savedWord = wordRepository.save(myWord);
-		for (Word w : myRelGroup.getWord()) {
-			for(Word2 temp : savedWord.getWord2()) {
+		for (Word w : myRelGroup.getWord()) { //n+1
+			for(Word2 temp : savedWord.getWord2()) { //n+1
 				//Check if <nw,w> exists
 				if (w.getWordval() == temp.getWordval()) {
 					temp.setCount(temp.getCount()+1);
@@ -316,7 +316,7 @@ public class BookServiceImpl implements BookService {
 			}
 			if (foundPair) continue;
 			try { //Check if nw exists in Word2
-				Set<Word2> w2set = word2Repository.findByWordval(word);
+				Set<Word2> w2set = word2Repository.findByWordval(word); //n+1
 				for(Word2 temp : w2set) {
 					//Check if <w,nw> exists
 					if(w.getId() == temp.getWord1().getId()) {
@@ -394,10 +394,10 @@ public class BookServiceImpl implements BookService {
 			/*for (Word r : temp) {
 				System.out.println(r.getWordval());
 			}*/		
-			Set<Word> dw_set = wordRepository.findByWordval(word);
+			Set<Word> dw_set = wordRepository.findByWordval(word); //n+1
 			boolean found = false;
 			dw = dw_set.iterator().next();
-			for (RelGroup r : dw.getRelgroup()) {
+			for (RelGroup r : dw.getRelgroup()) { //n+1
 				if (r.getBook().getId() == book.getId()) {
 					myRelGroup = r;
 					found=true;
@@ -413,7 +413,7 @@ public class BookServiceImpl implements BookService {
 		}
 
 		
-		if (myRelGroup.getWord().size()<=1) {
+		if (myRelGroup.getWord().size()<=1) { //n+1
 			book.getRelgroup().remove(myRelGroup);
 			relGroupRepository.delete(myRelGroup);
 			bookRepository.save(book);
@@ -430,7 +430,7 @@ public class BookServiceImpl implements BookService {
 		//Decrement dw count or delete dw
 		//For each word w in RelGroup, decrement or delete <dw,w> or <w,dw>
 		//Remove each pair from RelGroup
-		if (dw.getCount() <= 1) {
+		if (dw.getCount() <= 1) { //n+1
 			for (Word2 w2 : dw_w2s) {
 				//Remove word2 from RelGroup
 				myRelGroup.getWord2().remove(w2);
@@ -446,7 +446,7 @@ public class BookServiceImpl implements BookService {
 			for(Word w : ws) {
 				//if w in dw.word2, update <dw,w>
 				for(Word2 dw_w2 : dw_w2s) {
-					if(w.getWordval() == dw_w2.getWordval()) {
+					if(w.getWordval() == dw_w2.getWordval()) { //n+1
 						dw_w2.setCount(dw_w2.getCount()-1);
 						myRelGroup.getWord2().remove(dw_w2);
 						RelGroup rgsaved = relGroupRepository.save(myRelGroup);
@@ -458,7 +458,7 @@ public class BookServiceImpl implements BookService {
 				}
 				if(found==true) break;
 				//If <dw,w> not found, look for <w,dw>
-				for(Word2 w_w2 : w.getWord2()) {
+				for(Word2 w_w2 : w.getWord2()) { //n+1
 					if(dw.getWordval() == w_w2.getWordval()) {
 						myRelGroup.getWord2().remove(w_w2);
 						RelGroup rgsaved = relGroupRepository.save(myRelGroup);
@@ -484,7 +484,7 @@ public class BookServiceImpl implements BookService {
 	
 	@Override
 	public BookResponseDTO getBookWords(String title, String type, int page, int size){
-		Page<Book> bp = bookRepository.findByTitleContaining(title, PageRequest.of(page, size));
+		Page<Book> bp = bookRepository.findByTitleContaining(title, PageRequest.of(page, size)); //n+1 with paging
 		List<Book> bs = bp.getContent();
 		List<EachBookResponseDTO> bl = new ArrayList<>();
 		
@@ -517,7 +517,7 @@ public class BookServiceImpl implements BookService {
 				}
 			}*/
 			List<String> wl = new ArrayList<>();
-			for(RelGroup r : b.getRelgroup()) {
+			for(RelGroup r : b.getRelgroup()) { //n+1 with paging
 				for (Word w : r.getWord()) {
 					wl.add(w.getWordval());
 				}
@@ -571,7 +571,7 @@ public class BookServiceImpl implements BookService {
 	public List<Book> getRel(String w1, String w2) {
 		try{
 			//Try <w1,w2>
-			Set<Word> ws = wordRepository.findByWordval(w1);
+			Set<Word> ws = wordRepository.findByWordval(w1); //n+1
 			Word first = ws.iterator().next();
 			List<Book> myBooks = new ArrayList<>();
 			for(Word2 second : first.getWord2()) {
@@ -585,7 +585,7 @@ public class BookServiceImpl implements BookService {
 			}
 			
 			//Try <w2,w1>
-			ws = wordRepository.findByWordval(w2);
+			ws = wordRepository.findByWordval(w2); //n+1
 			first = ws.iterator().next();
 			for(Word2 second : first.getWord2()) {
 				if (second.getWordval().equals(w1)) {
@@ -607,7 +607,7 @@ public class BookServiceImpl implements BookService {
 	@Override
 	public RelResponseDTO getTopRel() {
 		try{
-			Set<Word2> ws = word2Repository.findTop10ByOrderByCountDesc();
+			Set<Word2> ws = word2Repository.findTop10ByOrderByCountDesc(); //n+1 with limit entity graph
 			List<EachRelResponseDTO> pairs = new ArrayList<>();
 			for(Word2 w2 : ws) {
 				List<Title> books = new ArrayList<>();
@@ -626,7 +626,7 @@ public class BookServiceImpl implements BookService {
 	@Override
 	public CountResponseDTO getTopCount() {
 		try{
-			Set<Word> ws = wordRepository.findTop10ByOrderByCountDesc();
+			Set<Word> ws = wordRepository.findTop10ByOrderByCountDesc(); //n+1 with limit entity graph
 			List<EachCountResponseDTO> pairs = new ArrayList<>();
 			for(Word w : ws) {
 				List<Relword> rel_words = new ArrayList<>();
